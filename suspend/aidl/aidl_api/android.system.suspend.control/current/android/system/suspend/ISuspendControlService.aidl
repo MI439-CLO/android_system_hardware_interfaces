@@ -15,8 +15,9 @@
 // with such a backward incompatible change, it has a high risk of breaking
 // later when a module using the interface is updated, e.g., Mainline modules.
 
-package android.system.keystore2;
-@VintfStability
-parcelable CertificateChain {
-  byte[] data;
+package android.system.suspend;
+/* @hide */
+interface ISuspendControlService {
+  boolean registerCallback(android.system.suspend.ISuspendCallback callback);
+  boolean registerWakelockCallback(android.system.suspend.IWakelockCallback callback, @utf8InCpp String name);
 }
