@@ -22,12 +22,14 @@
 #include <android/system/suspend/1.0/ISystemSuspend.h>
 #include <hidl/HidlTransportSupport.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <string>
 
 #include "SuspendControlService.h"
 #include "WakeLockEntryList.h"
+#include "WakeupList.h"
 
 namespace android {
 namespace system {
@@ -60,6 +62,16 @@ struct SuspendStats {
     std::string lastFailedStep;
 };
 
+struct SleepTimeConfig {
+    std::chrono::milliseconds baseSleepTime;
+    std::chrono::milliseconds maxSleepTime;
+    double sleepTimeScaleFactor;
+    uint32_t backoffThreshold;
+    std::chrono::milliseconds shortSuspendThreshold;
+    bool failedSuspendBackoffEnabled;
+    bool shortSuspendBackoffEnabled;
+};
+
 std::string readFd(int fd);
 
 class WakeLock : public IWakeLock {
@@ -81,8 +93,9 @@ class WakeLock : public IWakeLock {
 class SystemSuspend : public ISystemSuspend {
    public:
     SystemSuspend(unique_fd wakeupCountFd, unique_fd stateFd, unique_fd suspendStatsFd,
-                  size_t maxNativeStatsEntries, unique_fd kernelWakelockStatsFd,
-                  unique_fd wakeupReasonsFd, std::chrono::milliseconds baseSleepTime,
+                  size_t maxStatsEntries, unique_fd kernelWakelockStatsFd,
+                  unique_fd wakeupReasonsFd, unique_fd suspendTimeFd,
+                  const SleepTimeConfig& sleepTimeConfig,
                   const sp<SuspendControlService>& controlService,
                   const sp<SuspendControlServiceInternal>& controlServiceInternal,
                   bool useSuspendCounter = true);
@@ -92,10 +105,12 @@ class SystemSuspend : public ISystemSuspend {
     bool enableAutosuspend();
     bool forceSuspend();
 
+    const WakeupList& getWakeupList() const;
     const WakeLockEntryList& getStatsList() const;
     void updateWakeLockStatOnRelease(const std::string& name, int pid, TimestampType timeNow);
     void updateStatsNow();
     Result<SuspendStats> getSuspendStats();
+    std::chrono::milliseconds getSleepTime() const;
 
    private:
     void initAutosuspend();
@@ -107,17 +122,22 @@ class SystemSuspend : public ISystemSuspend {
     unique_fd mStateFd;
 
     unique_fd mSuspendStatsFd;
+    unique_fd mSuspendTimeFd;
 
-    // Amount of sleep time between consecutive iterations of the suspend loop.
-    std::chrono::milliseconds mBaseSleepTime;
+    const SleepTimeConfig kSleepTimeConfig;
+
+    // Amount of thread sleep time between consecutive iterations of the suspend loop
     std::chrono::milliseconds mSleepTime;
-    // Updates sleep time depending on the result of suspend attempt.
-    void updateSleepTime(bool success);
+    int32_t mNumConsecutiveBadSuspends;
+
+    // Updates thread sleep time depending on the result of suspend attempt
+    void updateSleepTime(bool success, std::chrono::nanoseconds suspendTime);
 
     sp<SuspendControlService> mControlService;
     sp<SuspendControlServiceInternal> mControlServiceInternal;
 
     WakeLockEntryList mStatsList;
+    WakeupList mWakeupList;
 
     // If true, use mSuspendCounter to keep track of native wake locks. Otherwise, rely on
     // /sys/power/wake_lock interface to block suspend.
@@ -126,6 +146,8 @@ class SystemSuspend : public ISystemSuspend {
     unique_fd mWakeLockFd;
     unique_fd mWakeUnlockFd;
     unique_fd mWakeupReasonsFd;
+
+    std::atomic_flag mAutosuspendEnabled = ATOMIC_FLAG_INIT;
 };
 
 }  // namespace V1_0

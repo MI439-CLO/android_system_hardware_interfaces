@@ -69,8 +69,10 @@ binder::Status SuspendControlService::registerWakelockCallback(
     }
 
     auto l = std::lock_guard(mWakelockCallbackLock);
-    if (std::find(mWakelockCallbacks[name].begin(), mWakelockCallbacks[name].end(), callback) !=
-        mWakelockCallbacks[name].end()) {
+    if (std::find_if(mWakelockCallbacks[name].begin(), mWakelockCallbacks[name].end(),
+                     [&callback](const sp<IWakelockCallback>& i) {
+                         return IInterface::asBinder(callback) == IInterface::asBinder(i);
+                     }) != mWakelockCallbacks[name].end()) {
         LOG(ERROR) << __func__ << " Same wakelock callback has already been registered";
         return retOk(false, _aidl_return);
     }
@@ -87,17 +89,21 @@ binder::Status SuspendControlService::registerWakelockCallback(
 
 void SuspendControlService::binderDied(const wp<IBinder>& who) {
     auto l = std::lock_guard(mCallbackLock);
-    std::remove_if(mCallbacks.begin(), mCallbacks.end(), [&who](const sp<ISuspendCallback>& i) {
-        return who == IInterface::asBinder(i);
-    });
+    mCallbacks.erase(std::remove_if(mCallbacks.begin(), mCallbacks.end(),
+                                    [&who](const sp<ISuspendCallback>& i) {
+                                        return who == IInterface::asBinder(i);
+                                    }),
+                     mCallbacks.end());
 
     auto lWakelock = std::lock_guard(mWakelockCallbackLock);
     // Iterate through all wakelock names as same callback can be registered with different
     // wakelocks.
     for (auto wakelockIt = mWakelockCallbacks.begin(); wakelockIt != mWakelockCallbacks.end();) {
-        std::remove_if(
-            wakelockIt->second.begin(), wakelockIt->second.end(),
-            [&who](const sp<IWakelockCallback>& i) { return who == IInterface::asBinder(i); });
+        wakelockIt->second.erase(
+            std::remove_if(
+                wakelockIt->second.begin(), wakelockIt->second.end(),
+                [&who](const sp<IWakelockCallback>& i) { return who == IInterface::asBinder(i); }),
+            wakelockIt->second.end());
         if (wakelockIt->second.empty()) {
             wakelockIt = mWakelockCallbacks.erase(wakelockIt);
         } else {
@@ -169,11 +175,25 @@ binder::Status SuspendControlServiceInternal::getWakeLockStats(
     return binder::Status::ok();
 }
 
+binder::Status SuspendControlServiceInternal::getWakeupStats(
+    std::vector<WakeupInfo>* _aidl_return) {
+    const auto suspendService = mSuspend.promote();
+    if (!suspendService) {
+        return binder::Status::fromExceptionCode(binder::Status::Exception::EX_NULL_POINTER,
+                                                 String8("Null reference to suspendService"));
+    }
+
+    suspendService->getWakeupList().getWakeupStats(_aidl_return);
+    return binder::Status::ok();
+}
+
 static std::string dumpUsage() {
-    return "\nUsage: adb shell dumpsys suspend_control [option]\n\n"
+    return "\nUsage: adb shell dumpsys suspend_control_internal [option]\n\n"
            "   Options:\n"
            "       --wakelocks      : returns wakelock stats.\n"
+           "       --wakeups        : returns wakeup stats.\n"
            "       --suspend_stats  : returns suspend stats.\n"
+           "       --all or -a      : returns all stats.\n"
            "       --help or -h     : prints this message.\n\n"
            "   Note: All stats are returned  if no or (an\n"
            "         invalid) option is specified.\n\n";
@@ -187,29 +207,52 @@ status_t SuspendControlServiceInternal::dump(int fd, const Vector<String16>& arg
         return DEAD_OBJECT;
     }
 
-    bool wakelocks = true;
-    bool suspend_stats = true;
+    enum : int32_t {
+        OPT_WAKELOCKS = 1 << 0,
+        OPT_WAKEUPS = 1 << 1,
+        OPT_SUSPEND_STATS = 1 << 2,
+        OPT_ALL = ~0,
+    };
+    int opts = 0;
 
-    if (args.size() > 0) {
-        std::string arg(String8(args[0]).string());
-        if (arg == "--wakelocks") {
-            suspend_stats = false;
-        } else if (arg == "--suspend_stats") {
-            wakelocks = false;
-        } else if (arg == "-h" || arg == "--help") {
-            std::string usage = dumpUsage();
-            dprintf(fd, "%s\n", usage.c_str());
-            return OK;
+    if (args.empty()) {
+        opts = OPT_ALL;
+    } else {
+        for (const auto& arg : args) {
+            if (arg == String16("--wakelocks")) {
+                opts |= OPT_WAKELOCKS;
+            } else if (arg == String16("--wakeups")) {
+                opts |= OPT_WAKEUPS;
+            } else if (arg == String16("--suspend_stats")) {
+                opts |= OPT_SUSPEND_STATS;
+            } else if (arg == String16("-a") || arg == String16("--all")) {
+                opts = OPT_ALL;
+            } else if (arg == String16("-h") || arg == String16("--help")) {
+                std::string usage = dumpUsage();
+                dprintf(fd, "%s\n", usage.c_str());
+                return OK;
+            }
         }
     }
 
-    if (wakelocks) {
+    if (opts & OPT_WAKELOCKS) {
         suspendService->updateStatsNow();
         std::stringstream wlStats;
         wlStats << suspendService->getStatsList();
         dprintf(fd, "\n%s\n", wlStats.str().c_str());
     }
-    if (suspend_stats) {
+
+    if (opts & OPT_WAKEUPS) {
+        std::ostringstream wakeupStats;
+        std::vector<WakeupInfo> wakeups;
+        suspendService->getWakeupList().getWakeupStats(&wakeups);
+        for (const auto& w : wakeups) {
+            wakeupStats << w.toString() << std::endl;
+        }
+        dprintf(fd, "Wakeups:\n%s\n", wakeupStats.str().c_str());
+    }
+
+    if (opts & OPT_SUSPEND_STATS) {
         Result<SuspendStats> res = suspendService->getSuspendStats();
         if (!res.ok()) {
             LOG(ERROR) << "SuspendControlService: " << res.error().message();
