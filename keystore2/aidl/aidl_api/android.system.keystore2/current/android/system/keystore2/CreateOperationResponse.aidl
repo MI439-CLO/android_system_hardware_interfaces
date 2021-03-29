@@ -12,7 +12,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *////////////////////////////////////////////////////////////////////////////////
+ */
+///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -31,9 +32,11 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package android.system.keystore2;
+/* @hide */
 @VintfStability
 parcelable CreateOperationResponse {
   android.system.keystore2.IKeystoreOperation iOperation;
   @nullable android.system.keystore2.OperationChallenge operationChallenge;
   @nullable android.system.keystore2.KeyParameters parameters;
+  @nullable byte[] upgradedBlob;
 }

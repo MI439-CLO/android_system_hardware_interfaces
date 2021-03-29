@@ -12,7 +12,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *////////////////////////////////////////////////////////////////////////////////
+ */
+///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -31,6 +32,7 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package android.system.keystore2;
+/* @hide */
 @Backing(type="int") @VintfStability
 enum KeyPermission {
   NONE = 0,
@@ -45,4 +47,5 @@ enum KeyPermission {
   USE = 256,
   USE_DEV_ID = 512,
   USE_NO_LSKF_BINDING = 1024,
+  CONVERT_STORAGE_KEY_TO_EPHEMERAL = 2048,
 }
