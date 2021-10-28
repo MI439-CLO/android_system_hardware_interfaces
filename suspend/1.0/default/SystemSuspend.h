@@ -83,7 +83,8 @@ class SystemSuspend : public RefBase {
                   bool useSuspendCounter = true);
     void incSuspendCounter(const std::string& name);
     void decSuspendCounter(const std::string& name);
-    bool enableAutosuspend();
+    bool enableAutosuspend(const sp<IBinder>& token);
+    void disableAutosuspend();
     bool forceSuspend();
 
     const WakeupList& getWakeupList() const;
@@ -94,12 +95,16 @@ class SystemSuspend : public RefBase {
     Result<SuspendStats> getSuspendStats();
     void getSuspendInfo(SuspendInfo* info);
     std::chrono::milliseconds getSleepTime() const;
+    unique_fd reopenFileUsingFd(const int fd, int permission);
 
    private:
-    void initAutosuspend();
+    ~SystemSuspend(void) override;
+    void initAutosuspendLocked();
+    void disableAutosuspendLocked();
+    bool hasAliveAutosuspendTokenLocked();
 
-    std::mutex mCounterLock;
-    std::condition_variable mCounterCondVar;
+    std::mutex mAutosuspendLock;
+    std::condition_variable mAutosuspendCondVar;
     uint32_t mSuspendCounter;
     unique_fd mWakeupCountFd;
     unique_fd mStateFd;
@@ -133,7 +138,9 @@ class SystemSuspend : public RefBase {
     unique_fd mWakeUnlockFd;
     unique_fd mWakeupReasonsFd;
 
-    std::atomic_flag mAutosuspendEnabled = ATOMIC_FLAG_INIT;
+    std::atomic<bool> mAutosuspendEnabled{false};
+    std::atomic<bool> mAutosuspendThreadCreated{false};
+    std::vector<sp<IBinder>> mDisableAutosuspendTokens;
 };
 
 }  // namespace V1_0
